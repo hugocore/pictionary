@@ -1,0 +1,271 @@
+
+<html>
+<head>
+	<title>Pictionary vAlpha</title>
+</head>
+
+<link href="css/bootstrap.min.css" rel="stylesheet" media="screen">
+<script src="js/jquery-1.8.2.min.js"></script>
+<script src="js/bootstrap.min.js"></script>
+<script src="/socket.io/socket.io.jss"></script>
+
+<script type="text/javascript">
+
+$(document).ready(function(){
+
+	/*********** PREPARE THE GAME **********/
+
+	// Variables
+	var canvas = document.getElementById("canvas");
+	var w = $("#canvas").width();
+	var h = $("#canvas").height();
+	var started = false;
+	var moved = false;
+	var lastx = 0;
+	var lasty = 0;
+	
+	// Client Canvas and In-Memory Canvas
+	var ctx = document.getElementById("canvas").getContext("2d");
+	var memCanvas = document.createElement("canvas");
+	var memCtx = memCanvas.getContext("2d");
+	var points = [];
+	memCanvas.width = w;
+	memCanvas.height = h;
+	
+	// Bind canvas to listeners
+	$("#canvas").bind("mousedown", mouseDown);
+	$("#canvas").bind("mousemove", mouseMove);
+	$("#canvas").bind("mouseup", mouseUp);
+	$("#clear").bind("mousedown", clear);
+	$("#clear").bind("mousedown", clearDraw);
+	
+	// Conctext
+	ctx.lineWidth = 3;
+	ctx.lineJoin = 'round';
+	ctx.lineCap = 'round';
+	
+	/*********** DRAW FRAMEWORK **********/
+		
+	function mouseDown(e) {
+	    started = true;
+	    moved = false;
+	};
+	
+	function mouseMove(e)  {
+		moved = true;
+	    if (started) {	    
+	       drawPoint(e);
+	    }
+	};
+	
+	function mouseUp(e) {
+	    // Save to memory if something was draw
+	    if (started) {
+	        started = false;
+	        saveMemory();  
+	    }	
+	
+	    // Check for a single click
+	    if (!moved) {
+		    drawPoint(e);		    
+	    }	    
+	    
+	    updateServer();
+	    points = [];
+	};
+	
+	// Clear client and in-memory canvas
+	function clear() {   
+	    ctx.clearRect(0, 0, w, h);
+	    memCtx.clearRect(0, 0, w, h);
+	};
+	
+	// Draw a new point
+	function drawPoint(e) {
+		
+		// Draw last points
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(memCanvas, 0, 0);
+        
+        var m = getMouse(e, canvas);
+        points.push({
+            x: m.x,
+            y: m.y
+        });
+        
+        // Draw new point
+        drawPoints(ctx, points);
+        
+        // Send to other players
+        sendPoints();
+		
+	}
+
+	// Draw series of pts
+	function drawPoints(ctx, pts) {
+	
+	    // draw a basic circle instead
+	    if (pts.length < 6) {
+	        var b = pts[0];
+	        ctx.beginPath(), ctx.arc(b.x, b.y, ctx.lineWidth / 2, 0, Math.PI * 2, !0), ctx.closePath(), ctx.fill();
+	        return
+	    }
+	    	    
+	    ctx.beginPath(), ctx.moveTo(pts[0].x, pts[0].y);
+	    
+	    // draw a bunch of quadratics, using the average of two pts as the control point
+	    for (i = 1; i < pts.length - 2; i++) {
+	        var c = (pts[i].x + pts[i + 1].x) / 2;
+	        var d = (pts[i].y + pts[i + 1].y) / 2;
+	        ctx.quadraticCurveTo(pts[i].x, pts[i].y, c, d)
+	    }
+	    
+	    //ctx.quadraticCurveTo(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y);
+	    ctx.stroke();
+	}
+	
+	// Save in memory
+	function saveMemory() {
+        memCtx.clearRect(0, 0, w, h);
+        memCtx.drawImage(canvas, 0, 0);
+	}
+	
+	// Get mouse position
+	function getMouse(e, canvas) {
+	
+		var element = canvas, offsetX = 0, offsetY = 0, mx, my;
+		
+		// Compute the total offset. It's possible to cache this if you want
+		if (element.offsetParent !== undefined) {
+			do {
+			  offsetX += element.offsetLeft;
+			  offsetY += element.offsetTop;
+			} while ((element = element.offsetParent));
+		}
+		
+		mx = e.pageX - offsetX;
+		my = e.pageY - offsetY;      
+		    
+		// We return a simple javascript object with x and y defined
+		return {x: mx, y: my};
+		
+	}
+	
+	/*********** NETWORK FRAMEWORK ********/
+	
+	/* http://hugocore.pictionary.jit.su/ */
+	var socket = io.connect('http://hugocore.pictionary.jit.su/');
+	
+	/*************
+	**** Init ****
+	*************/
+	
+	var nick = "";
+	/*nick = prompt("What's your name?");
+
+	if (nick == "" || nick == null) {
+		n = prompt("Please, insert your name in the field!");
+	}
+
+	if (nick == "" || nick == null) {
+		alert("I'm sorry, no name, no chat! :(");
+		throw "stop execution";
+	}
+
+	nick = nick.replace(/ /g,'_');*/
+
+	/***********
+	**** Me ****
+	***********/
+	
+	// I am a new player
+	socket.emit('newPlayer', {nick: nick});
+	
+	function sendPoints() {
+		socket.emit('newPoints', {nick:nick, points: points});
+	}
+	
+	function clearDraw() {
+		socket.emit('clearDraw');
+	}
+	
+	function updateServer() {
+		socket.emit('updatePoints', {points: points});
+	}
+	
+	/***************
+	**** Others ****
+	***************/
+	
+	socket.on('newPoints', function (data) {
+		pts = data['points'];
+		drawPoints(ctx, pts);
+		saveMemory();
+	});
+
+	socket.on('clearDraw', function (data) {
+		clear();
+	});
+
+});
+
+</script>
+
+
+<style>
+
+#canvas {
+    background: whitesmoke; 
+    cursor: crosshair;  
+    -moz-border-radius: 8px;
+    border-radius: 8px;
+    border: 1px solid #d7d7d7;     
+}
+
+body {
+	padding-top: 60px;
+	padding-bottom: 40px;
+}
+
+</style>
+
+
+<body>
+
+	<div class="navbar navbar-inverse navbar-fixed-top">
+      <div class="navbar-inner">
+        <div class="container">
+          <a class="btn btn-navbar" data-toggle="collapse" data-target=".nav-collapse">
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </a>
+          <a class="brand" href="#">Pictonary Alpha</a>
+          <div class="nav-collapse collapse">
+            <ul class="nav">
+              <li class="active"><a href="#">Home</a></li>
+            </ul>
+           </div><!--/.nav-collapse -->
+        </div>
+      </div>
+    </div>
+
+	<div class="container">
+	
+		<canvas id="canvas" width="940" height="600">O teu browser não permite jogar! Experimenta usar outro! Obrigado.</canvas>
+	
+		<div id="controls" style="margin-top: 20px">
+			<a id="clear" href="#" class="btn">Clear</a>
+		</div>
+		
+		<hr>
+		
+		<footer>
+        	<p>&copy; Grupo Maravilha 2012</p>
+        </footer>
+	
+	</div>
+	
+</body>
+
+</html>
